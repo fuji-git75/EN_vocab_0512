@@ -1,0 +1,845 @@
+:root {
+    --primary-color: #3498db;
+    --secondary-color: #2ecc71;
+    --accent-color: #e74c3c;
+    --light-color: #ecf0f1;
+    --dark-color: #2c3e50;
+    --correct-color: #27ae60;
+    --wrong-color: #e74c3c;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    height: 100%;
+    font-family: 'Noto Sans JP', sans-serif;
+    background-color: #f5f7fa;
+    color: var(--dark-color);
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.app-container {
+    max-width: 768px;
+    margin: 0 auto;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 8px 0;
+    text-align: center;
+    z-index: 100;
+    flex-shrink: 0;
+}
+
+h1 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin: 0;
+}
+
+.tab-container {
+    display: flex;
+    background-color: #fff;
+    border-bottom: 1px solid #eee;
+    z-index: 90;
+    flex-shrink: 0;
+}
+
+.tab {
+    padding: 6px 0;
+    font-size: 11px;
+    background-color: transparent;
+    color: var(--dark-color);
+    border: none;
+    cursor: pointer;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    user-select: none;
+}
+
+.tab i {
+    font-size: 16px;
+    margin-bottom: 4px;
+}
+
+.tab:active {
+    background-color: #f0f0f0;
+}
+
+.tab.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.content-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+}
+
+.screen {
+    display: none;
+}
+
+.screen.active {
+    display: block;
+}
+
+/* カード共通スタイル */
+.card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+/* ホーム画面 */
+.welcome-text {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.welcome-text h2 {
+    color: var(--primary-color);
+    margin-bottom: 10px;
+    font-size: 1.3rem;
+}
+
+.buttons-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.btn {
+    display: block;
+    padding: 12px;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 14px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    min-height: 44px;
+}
+
+.btn:active {
+    opacity: 0.9;
+}
+
+.btn-accent {
+    background-color: var(--accent-color);
+}
+
+.btn-success {
+    background-color: var(--secondary-color);
+}
+
+/* テスト画面 */
+.test-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.test-info {
+    display: flex;
+    gap: 10px;
+}
+
+.test-info span {
+    background-color: var(--light-color);
+    border-radius: 15px;
+    padding: 3px 8px;
+    font-size: 12px;
+}
+
+.question-container {
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.question {
+    font-size: 1.5rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+.question-hint {
+    color: #7f8c8d;
+    font-size: 12px;
+}
+
+.answer-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.answer-option {
+    background-color: var(--light-color);
+    border-radius: 5px;
+    padding: 12px 8px;
+    text-align: center;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 50px;
+    user-select: none;
+}
+
+.answer-option:active {
+    opacity: 0.8;
+}
+
+.answer-option.correct {
+    background-color: var(--correct-color);
+    color: white;
+}
+
+.answer-option.wrong {
+    background-color: var(--wrong-color);
+    color: white;
+}
+
+.example-container {
+    margin-bottom: 15px;
+    font-size: 13px;
+}
+
+.example-container p {
+    margin-bottom: 5px;
+}
+
+.test-footer {
+    display: flex;
+    justify-content: center;
+}
+
+/* 結果画面 */
+.score {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    text-align: center;
+    margin: 15px 0;
+}
+
+.score-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.score-item {
+    background-color: var(--light-color);
+    border-radius: 5px;
+    padding: 8px;
+    text-align: center;
+}
+
+.score-label {
+    font-size: 11px;
+    color: #7f8c8d;
+}
+
+.score-value {
+    font-size: 1.3rem;
+    font-weight: 500;
+}
+
+.correct-value {
+    color: var(--correct-color);
+}
+
+.wrong-value {
+    color: var(--wrong-color);
+}
+
+/* オプション画面 */
+.form-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.form-group {
+    margin-bottom: 5px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.form-control {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    min-height: 40px;
+}
+
+.checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    flex: 0 0 calc(50% - 5px);
+    min-height: 30px;
+    font-size: 13px;
+}
+
+.checkbox-item input {
+    margin-right: 5px;
+    width: 16px;
+    height: 16px;
+}
+
+/* 品詞選択オプション */
+.pos-container {
+    display: none;
+}
+
+/* フラッシュカード */
+.flashcard-container {
+    margin-bottom: 15px;
+}
+
+.flashcard-progress {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.flashcard-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.control-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--light-color);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.control-btn:active {
+    background-color: #ddd;
+}
+
+.flashcard {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    height: 250px;
+    position: relative;
+    perspective: 1000px;
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 15px;
+}
+
+/* styles.css に以下を追加/修正 */
+/* フラッシュカードの回転アニメーションを削除し、フェードイン/アウトに変更 */
+.flashcard-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: opacity 0.3s ease;
+}
+
+.flashcard.flipped .flashcard-inner {
+    transform: rotateY(180deg);
+}
+.flashcard.flipped .flashcard-front {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.flashcard.flipped .flashcard-back {
+    opacity: 1;
+    visibility: visible;
+}
+.flashcard-front, .flashcard-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 15px;
+    transition: opacity 0.3s ease;
+}
+
+.flashcard-back {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.flashcard-word {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.flashcard-hint {
+    font-size: 13px;
+    color: #7f8c8d;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.flashcard-instruction {
+    position: absolute;
+    bottom: 15px;
+    font-size: 11px;
+    color: #95a5a6;
+}
+
+.flashcard-meaning {
+    font-size: 1.3rem;
+    font-weight: 500;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.flashcard-example, .flashcard-idioms {
+    font-size: 12px;
+    margin-bottom: 10px;
+    width: 100%;
+    text-align: center;
+}
+
+.flashcard-actions {
+    display: flex;
+    gap: 10px;
+    position: absolute;
+    bottom: 15px;
+    left: 0;
+    right: 0;
+    padding: 0 15px;
+}
+
+.flashcard-btn {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    min-height: 36px;
+}
+
+.flashcard-btn-known {
+    background-color: var(--correct-color);
+    color: white;
+}
+
+.flashcard-btn-unknown {
+    background-color: var(--wrong-color);
+    color: white;
+}
+
+/* 進捗画面 */
+.stats-container {
+    display: flex;
+    overflow-x: auto;
+    padding: 3px 0;
+    margin-bottom: 10px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.stat-card {
+    flex: 0 0 auto;
+    background-color: white;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    padding: 8px 15px;
+    margin-right: 8px;
+    text-align: center;
+    min-width: 80px;
+}
+
+.stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.stat-label {
+    font-size: 10px;
+    color: #7f8c8d;
+    white-space: nowrap;
+}
+
+.table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.progress-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.progress-table th, .progress-table td {
+    padding: 5px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.progress-table th {
+    background-color: var(--light-color);
+    font-weight: 500;
+    font-size: 11px;
+    position: sticky;
+    top: 0;
+}
+
+.progress-table td:nth-child(3) {
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mastery-level {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    color: white;
+}
+
+.mastery-low {
+    background-color: var(--wrong-color);
+}
+
+.mastery-medium {
+    background-color: #f39c12;
+}
+
+.mastery-high {
+    background-color: var(--correct-color);
+}
+
+/* カレンダー画面 */
+.calendar-navigation {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.month-display {
+    margin: 0 15px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.calendar-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    text-align: center;
+    font-weight: 500;
+    margin-bottom: 5px;
+    font-size: 11px;
+}
+
+.calendar-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.calendar-day {
+    height: 36px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-size: 12px;
+    user-select: none;
+    position: relative;
+}
+
+.calendar-day:active {
+    background-color: #f1f1f1;
+}
+
+.calendar-day.today {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.calendar-day.has-activity::after {
+    content: '';
+    width: 4px;
+    height: 4px;
+    background-color: var(--secondary-color);
+    border-radius: 50%;
+    position: absolute;
+    bottom: 3px;
+}
+
+.day-details {
+    margin-top: 15px;
+}
+
+.day-details h3 {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+}
+
+.day-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.day-stat {
+    background-color: var(--light-color);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.day-stat-label {
+    font-size: 10px;
+    color: #7f8c8d;
+}
+
+.day-stat-value {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.activity-list {
+    list-style: none;
+}
+
+.activity-list li {
+    padding: 4px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 12px;
+}
+
+/* 共通ユーティリティ */
+.sound-btn {
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    margin-left: 5px;
+}
+
+.sound-btn:active {
+    opacity: 0.8;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* 統計画面用スタイル */
+.chart-container {
+    width: 100%;
+    height: 250px;
+    margin-bottom: 15px;
+    position: relative;
+}
+
+.chart-filters {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.chart-filter {
+    padding: 8px 12px;
+    background-color: var(--light-color);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.chart-filter.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.stats-item {
+    padding: 8px;
+    background-color: var(--light-color);
+    border-radius: 5px;
+}
+
+.stats-label {
+    font-size: 11px;
+    color: #7f8c8d;
+}
+
+.stats-value {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.no-data {
+    text-align: center;
+    padding: 60px 0;
+    color: #95a5a6;
+    font-size: 14px;
+}
+
+/* 進捗テーブルの拡張スタイル */
+.progress-table th, .progress-table td {
+    padding: 6px 5px;
+}
+
+.high-weakness {
+    background-color: rgba(231, 76, 60, 0.1);
+}
+
+.medium-weakness {
+    background-color: rgba(243, 156, 18, 0.1);
+}
+
+.recent-status {
+    white-space: nowrap;
+}
+
+.recent-attempts {
+    display: flex;
+    gap: 2px;
+    justify-content: center;
+}
+
+.attempt-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin: 0 2px;
+}
+
+.attempt-dot.correct {
+    background-color: var(--correct-color);
+}
+
+.attempt-dot.wrong {
+    background-color: var(--wrong-color);
+}
+
+.no-recent-data {
+    font-size: 10px;
+    color: #999;
+}
+
+/* iPhone SE対応 */
+@media (max-width: 320px) {
+    .tab i {
+        font-size: 14px;
+    }
+    
+    .tab span {
+        font-size: 10px;
+    }
+    
+    .question {
+        font-size: 1.3rem;
+    }
+    
+    .flashcard {
+        height: 220px;
+    }
+    
+    .flashcard-word {
+        font-size: 1.5rem;
+    }
+    
+    .checkbox-item {
+        flex: 0 0 100%;
+    }
+
+    .chart-filters {
+        flex-wrap: wrap;
+    }
+    
+    .chart-filter {
+        font-size: 11px;
+        padding: 6px 8px;
+    }
+    
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
