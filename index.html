@@ -44,6 +44,10 @@
                 <i class="fas fa-clone"></i>
                 <span>カード</span>
             </button>
+            <button class="tab" data-screen="search">
+                <i class="fas fa-search"></i>
+                <span>検索</span>
+            </button>
             <button class="tab" data-screen="options">
                 <i class="fas fa-cog"></i>
                 <span>設定</span>
@@ -176,6 +180,14 @@
                         </select>
                     </div>
                     
+                    <div class="form-group">
+                        <label for="test-folder">単語フォルダ</label>
+                        <select id="test-folder" class="form-control">
+                            <option value="all">すべての単語</option>
+                            <option value="default">デフォルト</option>
+                        </select>
+                    </div>
+                    
                     <div id="pos-selector" class="form-group pos-container">
                         <label>品詞を選択</label>
                         <div class="checkbox-group">
@@ -228,6 +240,96 @@
                     </div>
                     
                     <button id="start-test-btn" class="btn">テスト開始</button>
+                    
+                    <hr style="margin: 30px 0;">
+                    
+                    <h3>アプリ設定</h3>
+                    <div class="form-group">
+                        <label for="default-screen">起動時の初期画面</label>
+                        <select id="default-screen" class="form-control">
+                            <option value="search">検索</option>
+                            <option value="home">ホーム</option>
+                            <option value="test">テスト</option>
+                            <option value="flashcard">フラッシュカード</option>
+                            <option value="progress">進捗</option>
+                            <option value="calendar">カレンダー</option>
+                            <option value="stats">統計</option>
+                        </select>
+                    </div>
+                    
+                    <button id="save-settings-btn" class="btn btn-success">設定を保存</button>
+                </div>
+            </div>
+            
+            <!-- 検索画面 -->
+            <div id="search-screen" class="screen">
+                <div class="search-container">
+                    <div class="search-box">
+                        <input type="text" id="search-input" class="form-control" placeholder="英単語を入力してください...">
+                        <button id="search-btn" class="btn"><i class="fas fa-search"></i></button>
+                    </div>
+                    
+                    <div id="search-result" class="search-result hidden">
+                        <div class="word-info">
+                            <div class="word-header">
+                                <span id="search-word" class="word-title"></span>
+                                <span id="search-pos" class="word-pos"></span>
+                                <button id="search-pronounce" class="sound-btn">
+                                    <i class="fas fa-volume-up"></i>
+                                </button>
+                            </div>
+                            <div class="word-meaning">
+                                <strong>意味:</strong> <span id="search-meaning"></span>
+                            </div>
+                            <div class="word-example">
+                                <strong>例文:</strong> <span id="search-example"></span>
+                                <button id="search-example-pronounce" class="sound-btn">
+                                    <i class="fas fa-volume-up"></i>
+                                </button>
+                            </div>
+                            <div class="word-idioms">
+                                <strong>熟語:</strong> <span id="search-idioms"></span>
+                            </div>
+                            <div class="add-to-list">
+                                <label for="folder-select">追加先フォルダ:</label>
+                                <select id="folder-select" class="form-control">
+                                    <option value="default">デフォルト</option>
+                                </select>
+                                <button id="add-to-folder-btn" class="btn btn-success">
+                                    <i class="fas fa-plus"></i> 単語帳に追加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="folder-management">
+                        <h3>フォルダ管理</h3>
+                        <div class="folder-create">
+                            <input type="text" id="new-folder-name" class="form-control" placeholder="新しいフォルダ名">
+                            <button id="create-folder-btn" class="btn">
+                                <i class="fas fa-folder-plus"></i> 作成
+                            </button>
+                        </div>
+                        <div id="folder-list" class="folder-list">
+                            <div class="folder-item active" data-folder="default">
+                                <i class="fas fa-folder"></i>
+                                <span>デフォルト</span>
+                                <span class="folder-count">(0)</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="import-section">
+                        <h3>単語リストのインポート</h3>
+                        <input type="file" id="import-file" accept=".csv,.txt" class="file-input">
+                        <label for="import-file" class="file-label">
+                            <i class="fas fa-file-import"></i> ファイルを選択
+                        </label>
+                        <button id="import-btn" class="btn" disabled>インポート</button>
+                        <div class="import-help">
+                            <small>CSV形式またはテキストファイル（1行1単語）をサポートしています</small>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -246,6 +348,14 @@
                     <div class="form-group">
                         <label for="flashcard-count">単語数</label>
                         <input type="number" id="flashcard-count" class="form-control" min="5" max="50" value="20">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="flashcard-folder">単語フォルダ</label>
+                        <select id="flashcard-folder" class="form-control">
+                            <option value="all">すべての単語</option>
+                            <option value="default">デフォルト</option>
+                        </select>
                     </div>
                     
                     <div class="form-group">

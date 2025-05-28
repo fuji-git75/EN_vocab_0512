@@ -12,7 +12,11 @@ let progressData = {
     totalTests: 0,
     wordMastery: {}, // {word: {attempts: 0, correct: 0, recentAttempts: []}}
     recentlyWrongWords: [], // 最近間違えた単語のリスト
-    testHistory: []
+    testHistory: [],
+    folders: {
+        default: { name: 'デフォルト', words: [] }
+    },
+    activeFolder: 'default'
 };
 
 // 現在のテスト状態
@@ -44,6 +48,14 @@ let studyRecord = {
     totalDays: 0
 };
 
+// アプリ設定
+let appSettings = {
+    defaultScreen: 'search', // デフォルトを検索画面に設定
+    selectedFolders: [],  // 選択されたフォルダーを保存
+    selectedTestFolder: 'all',  // テスト用に選択されたフォルダ
+    selectedFlashcardFolder: 'all'  // フラッシュカード用に選択されたフォルダ
+};
+
 // フラッシュカードデータ
 let flashcardData = {
     words: [],
@@ -67,11 +79,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // タブ切り替え設定
     setupTabs();
     
+    // フォルダセレクトボックスを更新
+    updateFolderSelects();
+    
     // モックデータ（実際のアプリではwords.jsを読み込む）
     setupMockData();
     
     // ローカルストレージから進捗データを読み込む
     loadProgressData();
+    
+    // アプリ設定を読み込む
+    loadAppSettings();
     
     // ボタンイベント設定
     setupButtonEvents();
@@ -94,8 +112,1847 @@ document.addEventListener('DOMContentLoaded', function() {
     // フラッシュカード結果画面用のスタイル追加
     addFlashcardResultStyles();
     
+    // 検索機能の初期化
+    initSearchFeature();
+    
+    // 初期画面を表示
+    switchScreen(appSettings.defaultScreen);
+    
     console.log('アプリの初期化が完了しました');
 });
+
+// 検索機能の初期化
+function initSearchFeature() {
+    const searchInput = document.getElementById('search-input');
+    const searchBtn = document.getElementById('search-btn');
+    const searchResult = document.getElementById('search-result');
+    const addToFolderBtn = document.getElementById('add-to-folder-btn');
+    const createFolderBtn = document.getElementById('create-folder-btn');
+    const newFolderName = document.getElementById('new-folder-name');
+    const folderList = document.getElementById('folder-list');
+    const folderSelect = document.getElementById('folder-select');
+    const importFile = document.getElementById('import-file');
+    const importBtn = document.getElementById('import-btn');
+    
+    // 検索ボタンのイベント
+    searchBtn.addEventListener('click', performSearch);
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') performSearch();
+    });
+    
+    // フォルダに追加
+    addToFolderBtn.addEventListener('click', addWordToFolder);
+    
+    // フォルダ作成
+    createFolderBtn.addEventListener('click', createNewFolder);
+    
+    // ファイル選択
+    importFile.addEventListener('change', (e) => {
+        importBtn.disabled = !e.target.files.length;
+    });
+    
+    // インポート実行
+    importBtn.addEventListener('click', importWordList);
+    
+    // フォルダリストを更新
+    updateFolderList();
+}
+
+// スペルチェック機能
+async function checkSpelling(word) {
+    // 文字列でない場合は空配列を返す
+    if (typeof word !== 'string' || !word) {
+        return [];
+    }
+    
+    // 内蔵辞書とwords.jsの全単語を収集
+    const allWords = new Set();
+    
+    // 内蔵辞書から
+    Object.keys(japaneseDict).forEach(w => allWords.add(w.toLowerCase()));
+    
+    // words.jsから
+    if (wordData && Array.isArray(wordData)) {
+        wordData.forEach(w => {
+            if (w && w.Word) {
+                allWords.add(w.Word.toLowerCase());
+            }
+        });
+    }
+    
+    const lowerWord = word.toLowerCase();
+    
+    // 完全一致したら空配列を返す
+    if (allWords.has(lowerWord)) {
+        return [];
+    }
+    
+    // レーベンシュタイン距離を計算する関数
+    function levenshteinDistance(a, b) {
+        const matrix = [];
+        
+        for (let i = 0; i <= b.length; i++) {
+            matrix[i] = [i];
+        }
+        
+        for (let j = 0; j <= a.length; j++) {
+            matrix[0][j] = j;
+        }
+        
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1
+                    );
+                }
+            }
+        }
+        
+        return matrix[b.length][a.length];
+    }
+    
+    // 類似単語を探す
+    const suggestions = [];
+    
+    allWords.forEach(dictWord => {
+        const distance = levenshteinDistance(lowerWord, dictWord);
+        
+        if (distance <= 3) { // 距離3以下の候補を収集
+            suggestions.push({ word: dictWord, distance: distance });
+        }
+    });
+    
+    // 距離でソートして上位5件を返す
+    return suggestions
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 5)
+        .map(s => s.word);
+}
+
+// 単語検索を実行
+async function performSearch(wordToSearch = null) {
+    // イベントオブジェクトが渡された場合は無視
+    if (wordToSearch && typeof wordToSearch === 'object' && wordToSearch.constructor.name.includes('Event')) {
+        wordToSearch = null;
+    }
+    
+    const searchInput = document.getElementById('search-input');
+    const searchWord = wordToSearch || searchInput.value.trim();
+    
+    if (!searchWord || typeof searchWord !== 'string') return;
+    
+    // 検索中の表示
+    const searchResult = document.getElementById('search-result');
+    searchResult.classList.remove('hidden');
+    
+    // スペルチェック
+    const suggestions = await checkSpelling(searchWord);
+    
+    // 候補がある場合は選択肢を表示
+    if (suggestions.length > 0) {
+        showSpellingSuggestions(searchWord, suggestions);
+        return;
+    }
+    
+    // 正しいスペルの場合は通常の検索を実行
+    executeSearch(searchWord);
+}
+
+// スペル候補を表示
+function showSpellingSuggestions(originalWord, suggestions) {
+    const searchResult = document.getElementById('search-result');
+    searchResult.classList.remove('hidden');
+    
+    document.getElementById('search-word').textContent = originalWord;
+    document.getElementById('search-meaning').innerHTML = `
+        <div style="color: #e74c3c; margin-bottom: 10px;">
+            「${originalWord}」が見つかりませんでした。
+        </div>
+        <div style="margin-bottom: 10px;">もしかして：</div>
+        <div class="spelling-suggestions">
+            ${suggestions.map(word => `
+                <button class="suggestion-btn" onclick="window.performSearch('${word}')" style="
+                    margin: 5px;
+                    padding: 8px 16px;
+                    background: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 16px;
+                ">
+                    ${word}
+                </button>
+            `).join('')}
+        </div>
+    `;
+    document.getElementById('search-example').textContent = '';
+    document.getElementById('search-idioms').textContent = '';
+    
+    // フォルダに追加ボタンを非表示
+    const addBtn = document.getElementById('add-to-folder-btn');
+    if (addBtn) addBtn.style.display = 'none';
+}
+
+// 実際の検索を実行
+async function executeSearch(word) {
+    const searchResult = document.getElementById('search-result');
+    
+    // 検索フィールドを更新
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+        searchInput.value = word;
+    }
+    
+    document.getElementById('search-word').textContent = word;
+    document.getElementById('search-meaning').textContent = '検索中...';
+    document.getElementById('search-example').textContent = '';
+    document.getElementById('search-idioms').textContent = '';
+    
+    try {
+        // 最適な方法で単語情報を取得
+        const wordInfo = await getCompleteWordInfo(word);
+        displaySearchResult(wordInfo);
+        
+        // フォルダに追加ボタンを表示
+        const addBtn = document.getElementById('add-to-folder-btn');
+        if (addBtn) addBtn.style.display = 'block';
+    } catch (error) {
+        console.error('検索エラー:', error);
+        // エラー時は基本情報を表示
+        displayBasicResult(word);
+    }
+}
+
+// 検索結果を表示
+function displaySearchResult(wordInfo) {
+    const searchResult = document.getElementById('search-result');
+    searchResult.classList.remove('hidden');
+    
+    document.getElementById('search-word').textContent = wordInfo.Word;
+    document.getElementById('search-pos').textContent = `[${wordInfo.POS}]`;
+    document.getElementById('search-meaning').textContent = wordInfo['日本語訳'];
+    document.getElementById('search-example').textContent = wordInfo['テキストで使われている文章 (例)'] || wordInfo['その他語を使った英語の例文'];
+    document.getElementById('search-idioms').textContent = wordInfo['単語を使った代表的な熟語など'] || '―';
+    
+    // 音声ボタンの設定
+    const pronounceBtn = document.getElementById('search-pronounce');
+    pronounceBtn.onclick = () => speak(wordInfo.Word);
+    
+    const examplePronounceBtn = document.getElementById('search-example-pronounce');
+    examplePronounceBtn.onclick = () => speak(document.getElementById('search-example').textContent);
+    
+    // 一時的に保存
+    searchResult.dataset.currentWord = JSON.stringify(wordInfo);
+}
+
+// 完全な単語情報を取得する統合関数
+async function getCompleteWordInfo(word) {
+    // 文字列でない場合はエラー
+    if (typeof word !== 'string' || !word) {
+        throw new Error('Invalid word parameter');
+    }
+    
+    // 結果オブジェクトを初期化
+    let wordInfo = {
+        Word: word,
+        POS: 'n/v/adj',
+        '日本語訳': '',
+        'テキストで使われている文章 (例)': '',
+        '単語を使った代表的な熟語など': ''
+    };
+    
+    // 1. まずwords.jsから検索
+    const localWord = wordData.find(w => w.Word.toLowerCase() === word.toLowerCase());
+    if (localWord) {
+        return localWord;
+    }
+    
+    // 2. 内蔵辞書から日本語訳を取得
+    const dictTranslation = getJapaneseTranslationFromDict(word.toLowerCase());
+    if (dictTranslation) {
+        wordInfo['日本語訳'] = dictTranslation;
+    }
+    
+    // 3. 外部APIから補完情報を取得
+    try {
+        const apiInfo = await fetchFromMultipleAPIs(word);
+        
+        // APIから取得した情報で補完
+        if (!wordInfo['日本語訳'] && apiInfo.translation) {
+            wordInfo['日本語訳'] = apiInfo.translation;
+        }
+        if (apiInfo.pos) {
+            wordInfo.POS = apiInfo.pos;
+        }
+        if (apiInfo.example) {
+            wordInfo['テキストで使われている文章 (例)'] = apiInfo.example;
+        }
+        if (apiInfo.synonyms) {
+            wordInfo['単語を使った代表的な熟語など'] = apiInfo.synonyms;
+        }
+    } catch (error) {
+        console.log('API取得エラー:', error);
+    }
+    
+    // 4. 日本語訳がまだない場合は、簡易的な翻訳を試みる
+    if (!wordInfo['日本語訳']) {
+        wordInfo['日本語訳'] = await getSimpleTranslation(word);
+    }
+    
+    return wordInfo;
+}
+
+// 複数のAPIから情報を取得
+async function fetchFromMultipleAPIs(word) {
+    const results = {
+        translation: '',
+        pos: '',
+        example: '',
+        synonyms: ''
+    };
+    
+    // 1. MyMemory Translation APIで日本語訳を取得
+    try {
+        const translationResponse = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|ja`);
+        if (translationResponse.ok) {
+            const translationData = await translationResponse.json();
+            if (translationData.responseStatus === 200 && translationData.responseData && translationData.responseData.translatedText) {
+                results.translation = translationData.responseData.translatedText;
+            }
+        }
+    } catch (error) {
+        console.log('MyMemory API エラー:', error);
+    }
+    
+    // 2. Free Dictionary APIで例文と品詞情報を取得
+    try {
+        const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+        if (response.ok) {
+            const data = await response.json();
+            const entry = data[0];
+            const meanings = entry.meanings || [];
+            
+            if (meanings.length > 0) {
+                const firstMeaning = meanings[0];
+                results.pos = mapPOS(firstMeaning.partOfSpeech);
+                
+                const definitions = firstMeaning.definitions || [];
+                if (definitions.length > 0) {
+                    if (definitions[0].example) {
+                        results.example = definitions[0].example;
+                    }
+                    
+                    // 同義語を収集
+                    const synonyms = [];
+                    definitions.forEach(def => {
+                        if (def.synonyms && def.synonyms.length > 0) {
+                            synonyms.push(...def.synonyms);
+                        }
+                    });
+                    if (synonyms.length > 0) {
+                        results.synonyms = `類義語: ${[...new Set(synonyms)].slice(0, 5).join(', ')}`;
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.log('Dictionary API エラー:', error);
+    }
+    
+    return results;
+}
+
+// 品詞をマッピング
+function mapPOS(pos) {
+    const posMap = {
+        'noun': 'n',
+        'verb': 'v',
+        'adjective': 'adj',
+        'adverb': 'adv',
+        'preposition': 'prep',
+        'conjunction': 'conj',
+        'pronoun': 'pron',
+        'interjection': 'interj'
+    };
+    return posMap[pos?.toLowerCase()] || 'n/v/adj';
+}
+
+// 簡易的な翻訳を取得
+async function getSimpleTranslation(word) {
+    // よく使われる接頭辞・接尾辞から推測
+    const prefixSuffix = {
+        'un': '非〜、不〜',
+        're': '再〜',
+        'pre': '前〜',
+        'post': '後〜',
+        'over': '過度の〜',
+        'under': '不足の〜',
+        'tion': '〜すること',
+        'ment': '〜すること',
+        'ness': '〜であること',
+        'ful': '〜に満ちた',
+        'less': '〜のない',
+        'able': '〜できる',
+        'ible': '〜できる',
+        'ly': '〜に（副詞）',
+        'er': '〜する人/もの',
+        'or': '〜する人/もの',
+        'ist': '〜主義者、〜家',
+        'ism': '〜主義',
+        'ize': '〜化する',
+        'ise': '〜化する'
+    };
+    
+    // 接頭辞・接尾辞のヒントを追加
+    let hint = '';
+    for (const [affix, meaning] of Object.entries(prefixSuffix)) {
+        if (word.startsWith(affix) || word.endsWith(affix)) {
+            hint = ` (${meaning})`;
+            break;
+        }
+    }
+    
+    return `${word}${hint} (要確認)`;
+}
+
+// 日本語辞書データ
+const japaneseDict = {
+    // 基本動詞
+    'be': 'である、いる',
+    'have': '持つ、ある',
+    'do': 'する',
+    'say': '言う',
+    'go': '行く',
+    'get': '得る、もらう',
+    'make': '作る',
+    'know': '知る',
+    'think': '考える、思う',
+    'take': '取る、連れて行く',
+    'see': '見る',
+    'come': '来る',
+    'want': '欲しい、したい',
+    'look': '見る、〜に見える',
+    'use': '使う',
+    'find': '見つける',
+    'give': '与える',
+    'tell': '話す、伝える',
+    'work': '働く、機能する',
+    'call': '呼ぶ、電話する',
+    'try': '試す',
+    'ask': '尋ねる、頼む',
+    'need': '必要とする',
+    'feel': '感じる',
+    'become': 'なる',
+    'leave': '去る、残す',
+    'put': '置く',
+    'mean': '意味する',
+    'keep': '保つ',
+    'let': '〜させる',
+    'begin': '始める',
+    'seem': '〜のようだ',
+    'help': '助ける',
+    'talk': '話す',
+    'turn': '回る、変わる',
+    'start': '始める',
+    'show': '見せる',
+    'hear': '聞く',
+    'play': '遊ぶ、演奏する',
+    'run': '走る',
+    'move': '動く',
+    'like': '好き',
+    'live': '住む、生きる',
+    'believe': '信じる',
+    'hold': '持つ、保つ',
+    'bring': '持ってくる',
+    'happen': '起こる',
+    'write': '書く',
+    'provide': '提供する',
+    'sit': '座る',
+    'stand': '立つ',
+    'lose': '失う',
+    'pay': '払う',
+    'meet': '会う',
+    'include': '含む',
+    'continue': '続ける',
+    'set': '設定する',
+    'learn': '学ぶ',
+    'change': '変える',
+    'lead': '導く',
+    'understand': '理解する',
+    'watch': '見る、観察する',
+    'follow': '従う、ついて行く',
+    'stop': '止める',
+    'create': '作る、創造する',
+    'speak': '話す',
+    'read': '読む',
+    'allow': '許可する',
+    'add': '加える',
+    'spend': '費やす',
+    'grow': '成長する',
+    'open': '開く',
+    'walk': '歩く',
+    'win': '勝つ',
+    'offer': '提供する',
+    'remember': '覚えている',
+    'love': '愛する',
+    'consider': '考慮する',
+    'appear': '現れる',
+    'buy': '買う',
+    'wait': '待つ',
+    'serve': '仕える、提供する',
+    'die': '死ぬ',
+    'send': '送る',
+    'expect': '期待する',
+    'build': '建てる',
+    'stay': '滞在する',
+    'fall': '落ちる',
+    'cut': '切る',
+    'reach': '届く、達する',
+    'kill': '殺す',
+    'remain': '残る',
+    'suggest': '提案する',
+    'raise': '上げる',
+    'pass': '通る、合格する',
+    'sell': '売る',
+    'require': '必要とする',
+    'report': '報告する',
+    'decide': '決める',
+    'pull': '引く',
+    
+    // 基本名詞
+    'time': '時間',
+    'person': '人',
+    'year': '年',
+    'way': '方法、道',
+    'day': '日',
+    'man': '男',
+    'thing': '物、こと',
+    'woman': '女性',
+    'life': '人生、命',
+    'child': '子供',
+    'world': '世界',
+    'school': '学校',
+    'state': '状態、州',
+    'family': '家族',
+    'student': '学生',
+    'group': 'グループ',
+    'country': '国',
+    'problem': '問題',
+    'hand': '手',
+    'part': '部分',
+    'place': '場所',
+    'case': '場合、事例',
+    'week': '週',
+    'company': '会社',
+    'system': 'システム',
+    'program': 'プログラム',
+    'question': '質問',
+    'work': '仕事',
+    'government': '政府',
+    'number': '数',
+    'night': '夜',
+    'point': '点、ポイント',
+    'home': '家',
+    'water': '水',
+    'room': '部屋',
+    'mother': '母',
+    'area': '地域、領域',
+    'money': 'お金',
+    'story': '物語',
+    'fact': '事実',
+    'month': '月',
+    'book': '本',
+    'eye': '目',
+    'job': '仕事',
+    'word': '言葉',
+    'business': 'ビジネス',
+    'issue': '問題',
+    'side': '側',
+    'kind': '種類',
+    'head': '頭',
+    'house': '家',
+    'service': 'サービス',
+    'friend': '友達',
+    'father': '父',
+    'power': '力',
+    'hour': '時間',
+    'game': 'ゲーム',
+    'line': '線、列',
+    'end': '終わり',
+    'member': 'メンバー',
+    'law': '法律',
+    'car': '車',
+    'city': '都市',
+    'community': 'コミュニティ',
+    'name': '名前',
+    
+    // 基本形容詞
+    'good': '良い',
+    'new': '新しい',
+    'first': '最初の',
+    'last': '最後の',
+    'long': '長い',
+    'great': '素晴らしい',
+    'little': '小さい',
+    'own': '自分の',
+    'other': '他の',
+    'old': '古い',
+    'right': '正しい',
+    'big': '大きい',
+    'high': '高い',
+    'different': '異なる',
+    'small': '小さい',
+    'large': '大きい',
+    'next': '次の',
+    'early': '早い',
+    'young': '若い',
+    'important': '重要な',
+    'few': '少ない',
+    'public': '公共の',
+    'bad': '悪い',
+    'same': '同じ',
+    'able': 'できる',
+    
+    // 基本的な単語
+    'hello': 'こんにちは',
+    'goodbye': 'さようなら',
+    'please': 'お願いします',
+    'thank': 'ありがとう',
+    'sorry': 'ごめんなさい',
+    'yes': 'はい',
+    'no': 'いいえ',
+    'maybe': 'たぶん',
+    'ok': '大丈夫',
+    'okay': '大丈夫',
+    
+    // 数字
+    'one': '1、一つ',
+    'two': '2、二つ',
+    'three': '3、三つ',
+    'four': '4、四つ',
+    'five': '5、五つ',
+    'six': '6、六つ',
+    'seven': '7、七つ',
+    'eight': '8、八つ',
+    'nine': '9、九つ',
+    'ten': '10、十',
+    'hundred': '100、百',
+    'thousand': '1000、千',
+    'million': '100万',
+    'billion': '10億',
+    
+    // 曜日
+    'monday': '月曜日',
+    'tuesday': '火曜日',
+    'wednesday': '水曜日',
+    'thursday': '木曜日',
+    'friday': '金曜日',
+    'saturday': '土曜日',
+    'sunday': '日曜日',
+    
+    // 月
+    'january': '1月',
+    'february': '2月',
+    'march': '3月',
+    'april': '4月',
+    'may': '5月',
+    'june': '6月',
+    'july': '7月',
+    'august': '8月',
+    'september': '9月',
+    'october': '10月',
+    'november': '11月',
+    'december': '12月',
+    
+    // 色
+    'red': '赤',
+    'blue': '青',
+    'green': '緑',
+    'yellow': '黄色',
+    'black': '黒',
+    'white': '白',
+    'orange': 'オレンジ',
+    'purple': '紫',
+    'pink': 'ピンク',
+    'brown': '茶色',
+    'gray': '灰色',
+    'grey': '灰色',
+    
+    // 追加の頻出単語
+    'about': '〜について',
+    'after': '〜の後に',
+    'again': '再び',
+    'all': 'すべて',
+    'also': 'また',
+    'an': '一つの',
+    'and': 'そして',
+    'another': '別の',
+    'any': 'どんな〜でも',
+    'are': '〜である',
+    'as': '〜として',
+    'at': '〜で',
+    'back': '後ろ、戻る',
+    'because': 'なぜなら',
+    'been': '〜であった',
+    'before': '〜の前に',
+    'being': '〜であること',
+    'between': '〜の間に',
+    'both': '両方',
+    'but': 'しかし',
+    'by': '〜によって',
+    'can': '〜できる',
+    'could': '〜できた',
+    'did': '〜した',
+    'down': '下へ',
+    'each': 'それぞれ',
+    'even': '〜さえ',
+    'every': 'すべての',
+    'for': '〜のために',
+    'from': '〜から',
+    'had': '持っていた',
+    'has': '持っている',
+    'her': '彼女の',
+    'here': 'ここ',
+    'him': '彼を',
+    'his': '彼の',
+    'how': 'どのように',
+    'if': 'もし',
+    'in': '〜の中に',
+    'into': '〜の中へ',
+    'is': '〜である',
+    'it': 'それ',
+    'its': 'それの',
+    'just': 'ちょうど',
+    'may': '〜かもしれない',
+    'me': '私を',
+    'more': 'もっと',
+    'most': '最も',
+    'much': 'たくさん',
+    'must': '〜しなければならない',
+    'my': '私の',
+    'never': '決して〜ない',
+    'not': '〜でない',
+    'now': '今',
+    'of': '〜の',
+    'off': '離れて',
+    'on': '〜の上に',
+    'only': 'だけ',
+    'or': 'または',
+    'our': '私たちの',
+    'out': '外へ',
+    'over': '〜の上に',
+    'own': '自分の',
+    'said': '言った',
+    'same': '同じ',
+    'she': '彼女',
+    'should': '〜すべき',
+    'since': '〜以来',
+    'so': 'だから',
+    'some': 'いくつかの',
+    'still': 'まだ',
+    'such': 'そのような',
+    'than': '〜より',
+    'that': 'それ',
+    'the': 'その',
+    'their': '彼らの',
+    'them': '彼らを',
+    'then': 'それから',
+    'there': 'そこ',
+    'these': 'これら',
+    'they': '彼ら',
+    'this': 'これ',
+    'those': 'それら',
+    'through': '〜を通って',
+    'to': '〜へ',
+    'too': '〜も',
+    'under': '〜の下に',
+    'up': '上へ',
+    'very': 'とても',
+    'was': '〜だった',
+    'we': '私たち',
+    'well': 'よく',
+    'were': '〜だった',
+    'what': '何',
+    'when': 'いつ',
+    'where': 'どこ',
+    'which': 'どれ',
+    'while': '〜の間',
+    'who': '誰',
+    'why': 'なぜ',
+    'will': '〜だろう',
+    'with': '〜と一緒に',
+    'would': '〜だろう',
+    'you': 'あなた',
+    'your': 'あなたの',
+    
+    // ビジネス・学習関連
+    'account': 'アカウント、口座',
+    'action': '行動',
+    'activity': '活動',
+    'address': '住所、演説',
+    'advance': '前進、進歩',
+    'advantage': '利点',
+    'advice': 'アドバイス',
+    'affect': '影響する',
+    'age': '年齢',
+    'agency': '代理店',
+    'agreement': '合意',
+    'air': '空気',
+    'amount': '量',
+    'analysis': '分析',
+    'answer': '答え',
+    'apply': '申し込む、適用する',
+    'application': '申請、応用、アプリケーション',
+    'appointment': '予約、約束、任命',
+    'approach': 'アプローチ、接近',
+    'argue': '議論する',
+    'article': '記事',
+    'attack': '攻撃',
+    'attention': '注意',
+    'available': '利用可能な',
+    'average': '平均',
+    'avoid': '避ける',
+    'bank': '銀行',
+    'base': '基盤、基地',
+    'basic': '基本的な',
+    'beautiful': '美しい',
+    'behavior': '行動',
+    'benefit': '利益',
+    'best': '最高の',
+    'better': 'より良い',
+    'bill': '請求書',
+    'board': '板、委員会',
+    'body': '体',
+    'break': '壊す、休憩',
+    'budget': '予算',
+    'building': '建物',
+    'campaign': 'キャンペーン',
+    'cancer': 'がん',
+    'capital': '資本、首都',
+    'card': 'カード',
+    'care': '世話、気にする',
+    'career': 'キャリア',
+    'carry': '運ぶ',
+    'catch': '捕まえる',
+    'cause': '原因',
+    'cell': '細胞',
+    'center': '中心',
+    'central': '中央の',
+    'century': '世紀',
+    'certain': '確かな',
+    'chair': '椅子',
+    'challenge': '挑戦',
+    'chance': 'チャンス',
+    'character': '性格、文字',
+    'charge': '料金、充電',
+    'check': 'チェック',
+    'choice': '選択',
+    'choose': '選ぶ',
+    'church': '教会',
+    'citizen': '市民',
+    'civil': '市民の',
+    'claim': '主張',
+    'class': 'クラス、階級',
+    'clear': '明確な',
+    'close': '閉じる、近い',
+    'coach': 'コーチ',
+    'cold': '冷たい',
+    'collection': 'コレクション',
+    'college': '大学',
+    'color': '色',
+    'commercial': '商業の',
+    'common': '一般的な',
+    'compare': '比較する',
+    'computer': 'コンピューター',
+    'concern': '懸念',
+    'condition': '状態',
+    'conference': '会議',
+    'congress': '議会',
+    'connect': '接続する',
+    'consider': '考慮する',
+    'consumer': '消費者',
+    'contain': '含む',
+    'control': 'コントロール',
+    'cost': '費用',
+    'couple': 'カップル',
+    'course': 'コース',
+    'court': '裁判所',
+    'cover': '覆う',
+    'crime': '犯罪',
+    'cultural': '文化的な',
+    'culture': '文化',
+    'cup': 'カップ',
+    'current': '現在の',
+    'customer': '顧客',
+    'dark': '暗い',
+    'data': 'データ',
+    'daughter': '娘',
+    'deal': '取引',
+    'death': '死',
+    'debate': '討論',
+    'decade': '10年間',
+    'decision': '決定',
+    'deep': '深い',
+    'defense': '防衛',
+    'degree': '度、学位',
+    'democratic': '民主的な',
+    'department': '部門',
+    'describe': '説明する',
+    'design': 'デザイン',
+    'despite': '〜にもかかわらず',
+    'detail': '詳細',
+    'determine': '決定する',
+    'develop': '開発する',
+    'development': '開発',
+    'difference': '違い',
+    'difficult': '難しい',
+    'dinner': '夕食',
+    'direction': '方向',
+    'director': 'ディレクター',
+    'discover': '発見する',
+    'discuss': '議論する',
+    'disease': '病気',
+    'doctor': '医者',
+    'dog': '犬',
+    'door': 'ドア',
+    'dream': '夢',
+    'drive': '運転する',
+    'drop': '落とす',
+    'drug': '薬',
+    'during': '〜の間',
+    'east': '東',
+    'easy': '簡単な',
+    'eat': '食べる',
+    'economic': '経済的な',
+    'economy': '経済',
+    'edge': '端',
+    'education': '教育',
+    'effect': '効果',
+    'effort': '努力',
+    'eight': '8',
+    'either': 'どちらか',
+    'election': '選挙',
+    'else': '他の',
+    'employee': '従業員',
+    'energy': 'エネルギー',
+    'enjoy': '楽しむ',
+    'enough': '十分な',
+    'enter': '入る',
+    'entire': '全体の',
+    'environment': '環境',
+    'environmental': '環境の',
+    'especially': '特に',
+    'establish': '設立する',
+    'evening': '夕方',
+    'event': 'イベント',
+    'ever': '今までに',
+    'everybody': '誰もが',
+    'everyone': '誰もが',
+    'everything': 'すべて',
+    'evidence': '証拠',
+    'exactly': '正確に',
+    'example': '例',
+    'executive': '幹部',
+    'exist': '存在する',
+    'experience': '経験',
+    'expert': '専門家',
+    'explain': '説明する',
+    'face': '顔',
+    'factor': '要因',
+    'fail': '失敗する',
+    'false': '偽の',
+    'famous': '有名な',
+    'far': '遠い',
+    'fast': '速い',
+    'fear': '恐れ',
+    'federal': '連邦の',
+    'feeling': '感情',
+    'field': '分野',
+    'fight': '戦う',
+    'figure': '人物、数字',
+    'fill': '満たす',
+    'film': '映画',
+    'final': '最終的な',
+    'finally': 'ついに',
+    'financial': '財政的な',
+    'fine': '素晴らしい',
+    'finger': '指',
+    'finish': '終える',
+    'fire': '火',
+    'firm': '会社',
+    'fish': '魚',
+    'floor': '床',
+    'fly': '飛ぶ',
+    'focus': '焦点',
+    'food': '食べ物',
+    'foot': '足',
+    'force': '力',
+    'foreign': '外国の',
+    'forget': '忘れる',
+    'form': '形',
+    'former': '前の',
+    'forward': '前へ',
+    'four': '4',
+    'free': '自由な',
+    'fresh': '新鮮な',
+    'front': '前',
+    'full': '満ちた',
+    'fund': '資金',
+    'future': '未来',
+    'garden': '庭',
+    'gas': 'ガス',
+    'general': '一般的な',
+    'generation': '世代',
+    'girl': '女の子',
+    'glass': 'ガラス',
+    'global': 'グローバル',
+    'goal': '目標',
+    'gold': '金',
+    'gone': '行ってしまった',
+    'government': '政府',
+    'great': '素晴らしい',
+    'ground': '地面',
+    'growth': '成長',
+    'guess': '推測する',
+    'gun': '銃',
+    'guy': '男',
+    'hair': '髪',
+    'half': '半分',
+    'hang': '掛ける',
+    'happy': '幸せな',
+    'hard': '硬い、難しい',
+    'health': '健康',
+    'heart': '心臓',
+    'heat': '熱',
+    'heavy': '重い',
+    'herself': '彼女自身',
+    'himself': '彼自身',
+    'history': '歴史',
+    'hit': '打つ',
+    'hope': '希望',
+    'hospital': '病院',
+    'hot': '熱い',
+    'hotel': 'ホテル',
+    'huge': '巨大な',
+    'human': '人間',
+    'hundred': '百',
+    'husband': '夫',
+    'idea': 'アイデア',
+    'identify': '識別する',
+    'image': '画像',
+    'imagine': '想像する',
+    'impact': '影響',
+    'improve': '改善する',
+    'increase': '増加する',
+    'indeed': '確かに',
+    'indicate': '示す',
+    'individual': '個人',
+    'industry': '産業',
+    'information': '情報',
+    'inside': '内側',
+    'instead': '代わりに',
+    'institution': '機関',
+    'interest': '興味',
+    'interesting': '面白い',
+    'international': '国際的な',
+    'interview': 'インタビュー',
+    'investment': '投資',
+    'involve': '含む',
+    'itself': 'それ自体',
+    'join': '参加する',
+    'key': '鍵',
+    'kid': '子供',
+    'kitchen': '台所',
+    'knowledge': '知識',
+    'land': '土地',
+    'language': '言語',
+    'large': '大きい',
+    'late': '遅い',
+    'later': '後で',
+    'laugh': '笑う',
+    'lawyer': '弁護士',
+    'lay': '置く',
+    'leader': 'リーダー',
+    'least': '最も少ない',
+    'leg': '脚',
+    'legal': '法的な',
+    'less': 'より少ない',
+    'letter': '手紙',
+    'level': 'レベル',
+    'lie': '嘘、横になる',
+    'light': '光',
+    'likely': 'ありそうな',
+    'list': 'リスト',
+    'listen': '聞く',
+    'local': '地元の',
+    'long': '長い',
+    'loss': '損失',
+    'lot': 'たくさん',
+    'low': '低い',
+    'machine': '機械',
+    'magazine': '雑誌',
+    'main': '主な',
+    'maintain': '維持する',
+    'major': '主要な',
+    'majority': '多数',
+    'manage': '管理する',
+    'management': '管理',
+    'manager': 'マネージャー',
+    'many': '多くの',
+    'market': '市場',
+    'marriage': '結婚',
+    'material': '材料',
+    'matter': '問題',
+    'maybe': 'たぶん',
+    'measure': '測る',
+    'media': 'メディア',
+    'medical': '医学の',
+    'meeting': '会議',
+    'memory': '記憶',
+    'mention': '言及する',
+    'message': 'メッセージ',
+    'method': '方法',
+    'middle': '中間',
+    'might': '〜かもしれない',
+    'military': '軍の',
+    'mind': '心',
+    'minute': '分',
+    'miss': '逃す',
+    'mission': '使命',
+    'model': 'モデル',
+    'modern': '現代的な',
+    'moment': '瞬間',
+    'morning': '朝',
+    'mouth': '口',
+    'movement': '動き',
+    'movie': '映画',
+    'music': '音楽',
+    'myself': '私自身',
+    'nation': '国家',
+    'national': '国の',
+    'natural': '自然な',
+    'nature': '自然',
+    'near': '近い',
+    'nearly': 'ほとんど',
+    'necessary': '必要な',
+    'network': 'ネットワーク',
+    'news': 'ニュース',
+    'newspaper': '新聞',
+    'nice': '素敵な',
+    'none': '誰も〜ない',
+    'nonetheless': 'それにもかかわらず',
+    'nor': '〜も〜ない',
+    'north': '北',
+    'note': 'メモ',
+    'nothing': '何もない',
+    'notice': '気づく',
+    'nevertheless': 'それにもかかわらず',
+    'office': 'オフィス',
+    'officer': '役員',
+    'official': '公式の',
+    'often': 'しばしば',
+    'oil': '油',
+    'once': '一度',
+    'operation': '操作',
+    'opportunity': '機会',
+    'option': 'オプション',
+    'order': '注文',
+    'organization': '組織',
+    'others': '他の人',
+    'outside': '外側',
+    'page': 'ページ',
+    'pain': '痛み',
+    'painting': '絵画',
+    'paper': '紙',
+    'parent': '親',
+    'park': '公園',
+    'particular': '特定の',
+    'particularly': '特に',
+    'partner': 'パートナー',
+    'party': 'パーティー',
+    'patient': '患者',
+    'pattern': 'パターン',
+    'peace': '平和',
+    'people': '人々',
+    'per': '〜につき',
+    'perform': '実行する',
+    'performance': 'パフォーマンス',
+    'perhaps': 'おそらく',
+    'period': '期間',
+    'personal': '個人的な',
+    'phone': '電話',
+    'physical': '物理的な',
+    'pick': '選ぶ',
+    'picture': '写真',
+    'piece': '一片',
+    'plan': '計画',
+    'plant': '植物',
+    'player': 'プレイヤー',
+    'pm': '午後',
+    'point': '点',
+    'police': '警察',
+    'policy': '政策',
+    'political': '政治的な',
+    'politics': '政治',
+    'poor': '貧しい',
+    'popular': '人気のある',
+    'population': '人口',
+    'position': '位置',
+    'positive': '肯定的な',
+    'possible': '可能な',
+    'practice': '練習',
+    'prepare': '準備する',
+    'present': '現在',
+    'president': '大統領',
+    'pressure': '圧力',
+    'pretty': 'かなり',
+    'prevent': '防ぐ',
+    'price': '価格',
+    'private': '私的な',
+    'probably': 'おそらく',
+    'procedure': '手順',
+    'process': 'プロセス',
+    'produce': '生産する',
+    'product': '製品',
+    'production': '生産',
+    'professional': 'プロフェッショナル',
+    'professor': '教授',
+    'project': 'プロジェクト',
+    'promise': '約束',
+    'promote': '促進する',
+    'promotion': '昇進、販促',
+    'property': '財産',
+    'proposal': '提案',
+    'propose': '提案する',
+    'protect': '守る',
+    'prove': '証明する',
+    'provide': '提供する',
+    'provision': '提供、条項',
+    'public': '公共の',
+    'purchase': '購入',
+    'purpose': '目的',
+    'pursue': '追求する',
+    'push': '押す',
+    'qualification': '資格',
+    'quality': '品質',
+    'quantity': '数量',
+    'quarter': '四半期',
+    'quickly': '素早く',
+    'quite': 'かなり',
+    'race': 'レース',
+    'radio': 'ラジオ',
+    'range': '範囲',
+    'rate': '率',
+    'rather': 'むしろ',
+    'reality': '現実',
+    'realize': '気づく',
+    'really': '本当に',
+    'reason': '理由',
+    'receipt': '領収書',
+    'receive': '受け取る',
+    'recent': '最近の',
+    'recently': '最近',
+    'recognize': '認識する',
+    'recommend': '推薦する',
+    'recommendation': '推薦',
+    'record': '記録',
+    'recover': '回復する',
+    'reduce': '減らす',
+    'refer': '参照する',
+    'reference': '参照',
+    'reflect': '反映する',
+    'refuse': '拒否する',
+    'regard': 'みなす',
+    'region': '地域',
+    'register': '登録する',
+    'registration': '登録',
+    'regular': '定期的な',
+    'regulation': '規制',
+    'reject': '拒絶する',
+    'relate': '関係する',
+    'relationship': '関係',
+    'religious': '宗教的な',
+    'remove': '取り除く',
+    'represent': '代表する',
+    'republican': '共和党の',
+    'research': '研究',
+    'resource': '資源',
+    'respond': '応答する',
+    'response': '応答',
+    'responsibility': '責任',
+    'rest': '休み',
+    'result': '結果',
+    'return': '戻る',
+    'reveal': '明らかにする',
+    'rich': '金持ちの',
+    'rise': '上がる',
+    'risk': 'リスク',
+    'road': '道路',
+    'rock': '岩',
+    'role': '役割',
+    'rule': 'ルール',
+    'safe': '安全な',
+    'save': '保存する',
+    'saving': '節約',
+    'scale': '規模',
+    'scan': 'スキャン',
+    'schedule': 'スケジュール',
+    'scheme': '計画',
+    'scope': '範囲',
+    'score': 'スコア',
+    'screen': '画面',
+    'scene': '場面',
+    'science': '科学',
+    'scientist': '科学者',
+    'score': 'スコア',
+    'sea': '海',
+    'season': '季節',
+    'seat': '座席',
+    'second': '2番目',
+    'section': 'セクション',
+    'security': 'セキュリティ',
+    'seek': '探す',
+    'sense': '感覚',
+    'series': 'シリーズ',
+    'serious': '真剣な',
+    'several': 'いくつかの',
+    'sex': '性',
+    'sexual': '性的な',
+    'shake': '振る',
+    'share': '共有する',
+    'shoot': '撃つ',
+    'short': '短い',
+    'shot': 'ショット',
+    'shoulder': '肩',
+    'sign': 'サイン',
+    'significant': '重要な',
+    'similar': '似た',
+    'simple': '簡単な',
+    'simply': '単に',
+    'sing': '歌う',
+    'single': '単一の',
+    'sister': '姉妹',
+    'site': 'サイト',
+    'situation': '状況',
+    'size': 'サイズ',
+    'skill': 'スキル',
+    'skin': '肌',
+    'smile': '微笑む',
+    'social': '社会的な',
+    'society': '社会',
+    'soldier': '兵士',
+    'somebody': '誰か',
+    'someone': '誰か',
+    'something': '何か',
+    'sometimes': '時々',
+    'son': '息子',
+    'song': '歌',
+    'soon': 'すぐに',
+    'sort': '種類',
+    'sound': '音',
+    'source': 'ソース',
+    'south': '南',
+    'southern': '南の',
+    'space': '空間',
+    'special': '特別な',
+    'specific': '特定の',
+    'speech': 'スピーチ',
+    'sport': 'スポーツ',
+    'spring': '春',
+    'staff': 'スタッフ',
+    'stage': 'ステージ',
+    'standard': '標準',
+    'star': '星',
+    'statement': '声明',
+    'station': '駅',
+    'step': 'ステップ',
+    'stock': '在庫',
+    'store': '店',
+    'strategy': '戦略',
+    'street': '通り',
+    'strong': '強い',
+    'structure': '構造',
+    'stuff': 'もの',
+    'style': 'スタイル',
+    'subject': '主題',
+    'success': '成功',
+    'successful': '成功した',
+    'suddenly': '突然',
+    'suffer': '苦しむ',
+    'summer': '夏',
+    'support': 'サポート',
+    'sure': '確かな',
+    'surface': '表面',
+    'system': 'システム',
+    'table': 'テーブル',
+    'task': 'タスク',
+    'tax': '税',
+    'teach': '教える',
+    'teacher': '先生',
+    'team': 'チーム',
+    'technology': 'テクノロジー',
+    'television': 'テレビ',
+    'tend': '傾向がある',
+    'term': '期間',
+    'test': 'テスト',
+    'text': 'テキスト',
+    'thank': '感謝する',
+    'themselves': '彼ら自身',
+    'theory': '理論',
+    'third': '3番目',
+    'thought': '考え',
+    'thousand': '千',
+    'threat': '脅威',
+    'throughout': '〜中',
+    'throw': '投げる',
+    'thus': 'このように',
+    'today': '今日',
+    'together': '一緒に',
+    'tonight': '今夜',
+    'top': 'トップ',
+    'total': '合計',
+    'tough': 'タフな',
+    'toward': '〜に向かって',
+    'town': '町',
+    'trade': '貿易',
+    'traditional': '伝統的な',
+    'training': 'トレーニング',
+    'travel': '旅行',
+    'treat': '扱う',
+    'treatment': '治療',
+    'tree': '木',
+    'trial': '試験',
+    'trip': '旅行',
+    'trouble': 'トラブル',
+    'true': '真実の',
+    'truth': '真実',
+    'try': '試す',
+    'turn': '回る',
+    'tv': 'テレビ',
+    'type': 'タイプ',
+    'understand': '理解する',
+    'unit': '単位',
+    'united': '統一された',
+    'university': '大学',
+    'unless': '〜でない限り',
+    'until': '〜まで',
+    'upon': '〜の上に',
+    'us': '私たちを',
+    'usually': '通常',
+    'value': '価値',
+    'various': '様々な',
+    'victim': '被害者',
+    'view': '見解',
+    'violence': '暴力',
+    'visit': '訪問',
+    'voice': '声',
+    'vote': '投票',
+    'wait': '待つ',
+    'wall': '壁',
+    'war': '戦争',
+    'watch': '見る',
+    'weapon': '武器',
+    'wear': '着る',
+    'weather': '天気',
+    'weight': '重さ',
+    'west': '西',
+    'western': '西の',
+    'whatever': '何でも',
+    'whether': '〜かどうか',
+    'whom': '誰を',
+    'whose': '誰の',
+    'wide': '広い',
+    'wife': '妻',
+    'wind': '風',
+    'window': '窓',
+    'wish': '願う',
+    'within': '〜の中に',
+    'without': '〜なしで',
+    'wonder': '不思議に思う',
+    'wood': '木材',
+    'worker': '労働者',
+    'world': '世界',
+    'worry': '心配する',
+    'worth': '価値がある',
+    'writer': '作家',
+    'wrong': '間違った',
+    'yard': 'ヤード',
+    'yeah': 'うん',
+    'yet': 'まだ',
+    'yourself': 'あなた自身',
+    'youth': '若者'
+};
+
+// 内蔵辞書から直接取得（await不要）
+function getJapaneseTranslationFromDict(word) {
+    return japaneseDict[word] || null;
+}
+
+// 外部APIから例文を取得
+async function fetchWordExamples(word) {
+    try {
+        const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+        if (!response.ok) return {};
+        
+        const data = await response.json();
+        const entry = data[0];
+        const meanings = entry.meanings || [];
+        
+        let example = '';
+        let pos = '';
+        let synonyms = '';
+        
+        if (meanings.length > 0) {
+            const firstMeaning = meanings[0];
+            pos = firstMeaning.partOfSpeech || '';
+            
+            const definitions = firstMeaning.definitions || [];
+            if (definitions.length > 0 && definitions[0].example) {
+                example = definitions[0].example;
+            }
+            
+            // 同義語を収集
+            const allSynonyms = [];
+            definitions.forEach(def => {
+                if (def.synonyms && def.synonyms.length > 0) {
+                    allSynonyms.push(...def.synonyms);
+                }
+            });
+            if (allSynonyms.length > 0) {
+                synonyms = `類義語: ${[...new Set(allSynonyms)].slice(0, 5).join(', ')}`;
+            }
+        }
+        
+        // 品詞をマッピング
+        const posMap = {
+            'noun': 'n',
+            'verb': 'v',
+            'adjective': 'adj',
+            'adverb': 'adv',
+            'preposition': 'prep',
+            'conjunction': 'conj',
+            'pronoun': 'pron',
+            'interjection': 'interj'
+        };
+        
+        return {
+            pos: posMap[pos.toLowerCase()] || 'n/v/adj',
+            example: example,
+            synonyms: synonyms
+        };
+    } catch (error) {
+        return {};
+    }
+}
+
+
+// MyMemory Translation APIを使用して日本語訳を取得
+async function getJapaneseTranslationFromAPI(word) {
+    try {
+        // MyMemory APIを使用（無料、1日あたり5000文字まで）
+        const apiUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|ja`;
+        
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error('Translation API error');
+        }
+        
+        const data = await response.json();
+        
+        // APIレスポンスの確認
+        if (data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+            // 翻訳された文字列を返す
+            return data.responseData.translatedText;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Translation API error:', error);
+        return null;
+    }
+}
+
+// 外部APIから単語情報を取得
+async function fetchWordFromAPI(word) {
+    try {
+        // Free Dictionary APIを使用
+        const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+        
+        if (!response.ok) {
+            throw new Error('単語が見つかりませんでした');
+        }
+        
+        const data = await response.json();
+        const entry = data[0];
+        
+        // APIのレスポンスを整形
+        const meanings = entry.meanings || [];
+        let allDefinitions = [];
+        let allExamples = [];
+        let allSynonyms = [];
+        let mainPOS = '';
+        
+        // すべての意味を収集
+        meanings.forEach((meaning, index) => {
+            if (index === 0) {
+                mainPOS = meaning.partOfSpeech || 'noun';
+            }
+            
+            const definitions = meaning.definitions || [];
+            definitions.forEach(def => {
+                if (def.definition) {
+                    allDefinitions.push(def.definition);
+                }
+                if (def.example) {
+                    allExamples.push(def.example);
+                }
+                if (def.synonyms && def.synonyms.length > 0) {
+                    allSynonyms = [...allSynonyms, ...def.synonyms];
+                }
+            });
+        });
+        
+        // 品詞をマッピング
+        const posMap = {
+            'noun': 'n',
+            'verb': 'v',
+            'adjective': 'adj',
+            'adverb': 'adv',
+            'preposition': 'prep',
+            'conjunction': 'conj',
+            'pronoun': 'pron',
+            'interjection': 'interj'
+        };
+        
+        // 日本語訳を生成
+        let japaneseTranslation = '';
+        
+        // まず内蔵辞書をチェック
+        const dictTranslation = getJapaneseTranslationFromDict(word.toLowerCase());
+        if (dictTranslation) {
+            japaneseTranslation = dictTranslation;
+        } else {
+            // 内蔵辞書にない場合は、MyMemory APIを使用
+            const apiTranslation = await getJapaneseTranslationFromAPI(word);
+            if (apiTranslation) {
+                japaneseTranslation = apiTranslation;
+            } else {
+                // APIも失敗した場合は、英語定義を簡潔に表示
+                const shortDef = allDefinitions[0] ? allDefinitions[0].split('.')[0] : 'No definition available';
+                japaneseTranslation = `${shortDef} (要確認)`;
+                
+                // 品詞情報を追加
+                if (mainPOS) {
+                    const posJapanese = {
+                        'noun': '名詞',
+                        'verb': '動詞',
+                        'adjective': '形容詞',
+                        'adverb': '副詞',
+                        'preposition': '前置詞',
+                        'conjunction': '接続詞',
+                        'pronoun': '代名詞',
+                        'interjection': '感動詞'
+                    };
+                    japaneseTranslation = `[${posJapanese[mainPOS.toLowerCase()] || mainPOS}] ${japaneseTranslation}`;
+                }
+            }
+        }
+        
+        // 例文を整形
+        const exampleText = allExamples.length > 0 ? allExamples[0] : '';
+        
+        // 同義語を整形
+        const uniqueSynonyms = [...new Set(allSynonyms)].slice(0, 5);
+        const synonymText = uniqueSynonyms.length > 0 ? `類義語: ${uniqueSynonyms.join(', ')}` : '';
+        
+        return {
+            Word: word,
+            POS: posMap[mainPOS.toLowerCase()] || 'n',
+            '日本語訳': japaneseTranslation,
+            'テキストで使われている文章 (例)': exampleText,
+            '単語を使った代表的な熟語など': synonymText
+        };
+    } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+    }
+}
+
+// 基本的な結果を表示（辞書にない場合）
+function displayBasicResult(word) {
+    const searchResult = document.getElementById('search-result');
+    searchResult.classList.remove('hidden');
+    
+    const basicInfo = {
+        Word: word,
+        POS: 'n/v/adj',
+        '日本語訳': '（単語が見つかりませんでした）',
+        'テキストで使われている文章 (例)': '',
+        '単語を使った代表的な熟語など': ''
+    };
+    
+    displaySearchResult(basicInfo);
+}
+
+// フォルダに単語を追加
+function addWordToFolder() {
+    const searchResult = document.getElementById('search-result');
+    const folderSelect = document.getElementById('folder-select');
+    const selectedFolder = folderSelect.value;
+    
+    if (!searchResult.dataset.currentWord) return;
+    
+    const wordInfo = JSON.parse(searchResult.dataset.currentWord);
+    
+    // フォルダに追加
+    if (!progressData.folders[selectedFolder].words.find(w => w.Word === wordInfo.Word)) {
+        progressData.folders[selectedFolder].words.push(wordInfo);
+        
+        // 最後に追加したフォルダを記録
+        progressData.lastAddedFolder = selectedFolder;
+        
+        saveProgressData();
+        updateFolderList();
+        
+        // 成功メッセージ
+        const message = document.createElement('div');
+        message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #2ecc71; color: white; padding: 15px 30px; border-radius: 5px; z-index: 10000; font-size: 16px;';
+        message.textContent = `「${wordInfo.Word}」を「${progressData.folders[selectedFolder].name}」に追加しました`;
+        document.body.appendChild(message);
+        
+        setTimeout(() => {
+            message.remove();
+        }, 2000);
+        
+        // 検索フィールドをクリアして次の検索の準備
+        document.getElementById('search-input').value = '';
+        document.getElementById('search-input').focus();
+    } else {
+        alert('この単語は既に登録されています');
+    }
+}
+
+// 新しいフォルダを作成
+function createNewFolder() {
+    const newFolderName = document.getElementById('new-folder-name');
+    const folderName = newFolderName.value.trim();
+    
+    if (!folderName) return;
+    
+    const folderId = 'folder_' + Date.now();
+    progressData.folders[folderId] = {
+        name: folderName,
+        words: []
+    };
+    
+    saveProgressData();
+    updateFolderList();
+    newFolderName.value = '';
+}
+
+// フォルダリストを更新
+function updateFolderList() {
+    const folderList = document.getElementById('folder-list');
+    const folderSelect = document.getElementById('folder-select');
+    
+    // リストをクリア
+    folderList.innerHTML = '';
+    folderSelect.innerHTML = '';
+    
+    // フォルダを表示
+    Object.entries(progressData.folders).forEach(([id, folder]) => {
+        // フォルダリスト項目
+        const folderItem = document.createElement('div');
+        folderItem.className = 'folder-item';
+        folderItem.dataset.folder = id;
+        if (id === progressData.activeFolder) {
+            folderItem.classList.add('active');
+        }
+        
+        folderItem.innerHTML = `
+            <i class="fas fa-folder"></i>
+            <span>${folder.name}</span>
+            <span class="folder-count">(${folder.words.length})</span>
+        `;
+        
+        folderItem.addEventListener('click', () => selectFolder(id));
+        folderList.appendChild(folderItem);
+        
+        // セレクトボックスオプション
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = folder.name;
+        folderSelect.appendChild(option);
+    });
+    
+    // 最後に追加したフォルダがあれば、それを選択
+    if (progressData.lastAddedFolder && progressData.folders[progressData.lastAddedFolder]) {
+        folderSelect.value = progressData.lastAddedFolder;
+    }
+    
+    // テストとフラッシュカードのフォルダセレクトも更新
+    updateFolderSelects();
+}
+
+// フォルダを選択
+function selectFolder(folderId) {
+    progressData.activeFolder = folderId;
+    saveProgressData();
+    updateFolderList();
+}
+
+// 単語リストをインポート
+async function importWordList() {
+    const importFile = document.getElementById('import-file');
+    const folderSelect = document.getElementById('folder-select');
+    const selectedFolder = folderSelect.value;
+    
+    if (!importFile.files.length) return;
+    
+    const file = importFile.files[0];
+    const text = await file.text();
+    const lines = text.split('\n').filter(line => line.trim());
+    
+    let importedCount = 0;
+    
+    for (const line of lines) {
+        const word = line.trim().split(',')[0]; // CSVの場合は最初のカラムを単語として扱う
+        if (!word) continue;
+        
+        // 既存の辞書から検索
+        let wordInfo = wordData.find(w => w.Word.toLowerCase() === word.toLowerCase());
+        
+        if (!wordInfo) {
+            // 辞書にない場合は基本情報を作成
+            wordInfo = {
+                Word: word,
+                POS: 'n/v/adj',
+                '日本語訳': '（要確認）',
+                'テキストで使われている文章 (例)': '',
+                '単語を使った代表的な熟語など': ''
+            };
+        }
+        
+        // フォルダに追加（重複チェック）
+        if (!progressData.folders[selectedFolder].words.find(w => w.Word === wordInfo.Word)) {
+            progressData.folders[selectedFolder].words.push(wordInfo);
+            importedCount++;
+        }
+    }
+    
+    saveProgressData();
+    updateFolderList();
+    
+    alert(`${importedCount}個の単語をインポートしました`);
+    importFile.value = '';
+    document.getElementById('import-btn').disabled = true;
+}
 
 // フラッシュカード結果画面用のスタイル追加
 function addFlashcardResultStyles() {
@@ -255,6 +2112,11 @@ function setupTabs() {
 function switchScreen(screenName) {
     console.log('画面切り替え:', screenName);
     
+    // 音声合成を停止
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+    
     // タブのアクティブ状態を更新
     const tabs = document.querySelectorAll('.tab');
     for (let tab of tabs) {
@@ -331,6 +2193,9 @@ function setupButtonEvents() {
     // フラッシュカード画面のボタン
     setupFlashcardEvents();
     
+    // 検索画面のボタン
+    setupSearchEvents();
+    
     // カレンダー画面のボタン
     document.getElementById('prev-month').addEventListener('click', function() {
         navigateCalendar(-1);
@@ -348,6 +2213,28 @@ function setupButtonEvents() {
                 this.classList.add('active');
                 drawPerformanceChart(this.dataset.type);
             });
+        });
+    }
+    
+    // 設定保存ボタン
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    if (saveSettingsBtn) {
+        saveSettingsBtn.addEventListener('click', function() {
+            const defaultScreenSelect = document.getElementById('default-screen');
+            if (defaultScreenSelect) {
+                appSettings.defaultScreen = defaultScreenSelect.value;
+                saveAppSettings();
+                
+                // 成功メッセージを表示
+                const message = document.createElement('div');
+                message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #2ecc71; color: white; padding: 15px 30px; border-radius: 5px; z-index: 10000; font-size: 16px;';
+                message.textContent = '設定を保存しました';
+                document.body.appendChild(message);
+                
+                setTimeout(() => {
+                    message.remove();
+                }, 2000);
+            }
         });
     }
 }
@@ -374,7 +2261,11 @@ function setupTestEvents() {
     const answerOptionsContainer = document.getElementById('answer-options');
     answerOptionsContainer.addEventListener('click', function(event) {
         const answerOption = event.target.closest('.answer-option');
-        if (answerOption && !answerOption.classList.contains('correct') && !answerOption.classList.contains('wrong')) {
+        if (answerOption && 
+            !answerOption.classList.contains('correct') && 
+            !answerOption.classList.contains('wrong') &&
+            answerOption.style.pointerEvents !== 'none' &&
+            !currentTest.questionAnswered) {
             checkAnswer(answerOption);
         }
     });
@@ -382,7 +2273,11 @@ function setupTestEvents() {
     // タッチデバイス対応
     answerOptionsContainer.addEventListener('touchend', function(event) {
         const answerOption = event.target.closest('.answer-option');
-        if (answerOption && !answerOption.classList.contains('correct') && !answerOption.classList.contains('wrong')) {
+        if (answerOption && 
+            !answerOption.classList.contains('correct') && 
+            !answerOption.classList.contains('wrong') &&
+            answerOption.style.pointerEvents !== 'none' &&
+            !currentTest.questionAnswered) {
             event.preventDefault();
             checkAnswer(answerOption);
         }
@@ -402,6 +2297,60 @@ function setupTestEvents() {
             speak(wordObj['テキストで使われている文章 (例)']);
         }
     });
+}
+
+// 検索画面のイベント設定
+function setupSearchEvents() {
+    // 検索ボタン
+    const searchBtn = document.getElementById('search-btn');
+    if (searchBtn) {
+        searchBtn.addEventListener('click', function() {
+            performSearch();
+        });
+    }
+    
+    // Enterキーで検索
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+    }
+    
+    // フォルダに追加ボタン
+    const addToFolderBtn = document.getElementById('add-to-folder-btn');
+    if (addToFolderBtn) {
+        addToFolderBtn.addEventListener('click', addWordToFolder);
+    }
+    
+    // 新しいフォルダ作成ボタン
+    const createFolderBtn = document.getElementById('create-folder-btn');
+    if (createFolderBtn) {
+        createFolderBtn.addEventListener('click', createNewFolder);
+    }
+    
+    // ファイルインポート
+    const importFile = document.getElementById('import-file');
+    const importBtn = document.getElementById('import-btn');
+    
+    if (importFile) {
+        importFile.addEventListener('change', function() {
+            if (importBtn) {
+                importBtn.disabled = !this.files.length;
+            }
+        });
+    }
+    
+    if (importBtn) {
+        importBtn.addEventListener('click', function() {
+            const file = importFile.files[0];
+            if (file) {
+                importWordList(file);
+            }
+        });
+    }
 }
 
 // フラッシュカード画面のイベント設定
@@ -495,8 +2444,16 @@ function speak(text) {
             synth.cancel();
         }
         
+        // テキストをクリーンアップ（アスタリスクや特殊文字を除去）
+        let cleanText = text
+            .replace(/\*/g, '') // アスタリスクを除去
+            .replace(/[\[\]\{\}\(\)]/g, '') // 括弧類を除去
+            .replace(/[""''「」『』]/g, '') // 引用符を除去
+            .replace(/\s+/g, ' ') // 連続する空白を単一の空白に
+            .trim();
+        
         // 新しい音声を作成
-        const utterance = new SpeechSynthesisUtterance(text);
+        const utterance = new SpeechSynthesisUtterance(cleanText);
         
         // 音声の設定（iPhoneに最適化）
         utterance.lang = 'en-US';
@@ -544,7 +2501,25 @@ function loadProgressData() {
                 progressData.recentlyWrongWords = [];
             }
             
+            // foldersがなければ初期化
+            if (!progressData.folders) {
+                progressData.folders = {
+                    default: { name: 'デフォルト', words: [] }
+                };
+            }
+            
+            // activeFolderがなければ初期化
+            if (!progressData.activeFolder) {
+                progressData.activeFolder = 'default';
+            }
+            
             console.log('進捗データを読み込みました');
+        } else {
+            // 保存データがない場合も初期化
+            progressData.folders = {
+                default: { name: 'デフォルト', words: [] }
+            };
+            progressData.activeFolder = 'default';
         }
     } catch (e) {
         console.error('進捗データの読み込みに失敗しました:', e);
@@ -552,7 +2527,11 @@ function loadProgressData() {
             totalTests: 0,
             wordMastery: {},
             recentlyWrongWords: [],
-            testHistory: []
+            testHistory: [],
+            folders: {
+                default: { name: 'デフォルト', words: [] }
+            },
+            activeFolder: 'default'
         };
     }
 }
@@ -565,6 +2544,27 @@ function saveProgressData() {
     } catch (e) {
         console.error('進捗データの保存に失敗しました:', e);
     }
+}
+
+// アプリ設定を読み込む
+function loadAppSettings() {
+    const savedSettings = localStorage.getItem('appSettings');
+    if (savedSettings) {
+        appSettings = JSON.parse(savedSettings);
+        console.log('アプリ設定を読み込みました:', appSettings);
+        
+        // 設定画面のセレクトボックスを更新
+        const defaultScreenSelect = document.getElementById('default-screen');
+        if (defaultScreenSelect) {
+            defaultScreenSelect.value = appSettings.defaultScreen;
+        }
+    }
+}
+
+// アプリ設定を保存
+function saveAppSettings() {
+    localStorage.setItem('appSettings', JSON.stringify(appSettings));
+    console.log('アプリ設定を保存しました:', appSettings);
 }
 
 // クイックテスト開始
@@ -600,6 +2600,42 @@ function startQuickTest() {
     startTest('en_to_ja', selectedWords, true, true, true);
 }
 
+// フォルダセレクトボックスを更新
+function updateFolderSelects() {
+    const testFolderSelect = document.getElementById('test-folder');
+    const flashcardFolderSelect = document.getElementById('flashcard-folder');
+    
+    if (testFolderSelect) {
+        testFolderSelect.innerHTML = '<option value="all">すべての単語</option>';
+        Object.entries(progressData.folders).forEach(([id, folder]) => {
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = `${folder.name} (${folder.words.length})`;
+            testFolderSelect.appendChild(option);
+        });
+        
+        // 保存された選択を復元
+        if (appSettings.selectedTestFolder) {
+            testFolderSelect.value = appSettings.selectedTestFolder;
+        }
+    }
+    
+    if (flashcardFolderSelect) {
+        flashcardFolderSelect.innerHTML = '<option value="all">すべての単語</option>';
+        Object.entries(progressData.folders).forEach(([id, folder]) => {
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = `${folder.name} (${folder.words.length})`;
+            flashcardFolderSelect.appendChild(option);
+        });
+        
+        // 保存された選択を復元
+        if (appSettings.selectedFlashcardFolder) {
+            flashcardFolderSelect.value = appSettings.selectedFlashcardFolder;
+        }
+    }
+}
+
 // カスタムテスト開始
 function startCustomTest() {
     const testType = document.getElementById('test-type').value;
@@ -608,6 +2644,13 @@ function startCustomTest() {
     const timerEnabled = document.getElementById('timer-enabled').checked;
     const showExamples = document.getElementById('show-examples').checked;
     const enableSound = document.getElementById('enable-sound').checked;
+    
+    // 選択されたフォルダを保存
+    const testFolderSelect = document.getElementById('test-folder');
+    if (testFolderSelect) {
+        appSettings.selectedTestFolder = testFolderSelect.value;
+        saveAppSettings();
+    }
     
     // 品詞選択（品詞別テストの場合のみ使用）
     let selectedPOS = [];
@@ -630,7 +2673,44 @@ function startCustomTest() {
 
 // ランダムに単語を選択（改良版 - 苦手な単語を優先）
 function getRandomWords(count, difficulty, partOfSpeech) {
-    let filteredWords = [...wordData];
+    // フォルダ選択を確認
+    const testFolderSelect = document.getElementById('test-folder');
+    const testFolder = testFolderSelect ? testFolderSelect.value : 'all';
+    let filteredWords = [];
+    
+    if (testFolder === 'all') {
+        // すべての単語を使用
+        filteredWords = [...wordData];
+    } else if (progressData.folders[testFolder]) {
+        // 選択されたフォルダの単語を使用
+        filteredWords = [...progressData.folders[testFolder].words];
+        console.log('フォルダから取得した単語:', filteredWords);
+        
+        // フォルダ内の単語が適切な形式であることを確認
+        filteredWords = filteredWords.filter(word => {
+            if (!word || typeof word !== 'object') {
+                console.warn('無効な単語データ:', word);
+                return false;
+            }
+            if (!word.Word || !word['日本語訳']) {
+                console.warn('必須フィールドが不足:', word);
+                return false;
+            }
+            return true;
+        });
+        
+        // 必須フィールドが欠けている場合はデフォルト値を設定
+        filteredWords = filteredWords.map(word => ({
+            Word: word.Word || '',
+            POS: word.POS || 'n/v/adj',
+            '日本語訳': word['日本語訳'] || '',
+            'テキストで使われている文章 (例)': word['テキストで使われている文章 (例)'] || '',
+            '単語を使った代表的な熟語など': word['単語を使った代表的な熟語など'] || ''
+        }));
+    } else {
+        // デフォルトに戻る
+        filteredWords = [...wordData];
+    }
     
     // wordDataに十分な単語があるか確認
     if (!filteredWords || filteredWords.length === 0) {
@@ -778,7 +2858,8 @@ function startTest(testType, words, timerEnabled, showExamples, enableSound) {
         showExamples: showExamples,
         enableSound: enableSound,
         questionStartTime: null,
-        questionTimes: []
+        questionTimes: [],
+        questionAnswered: false  // 現在の問題に回答済みかどうかのフラグ
     };
     
     // 画面を切り替え
@@ -832,7 +2913,23 @@ function updateTimerDisplay() {
 
 // 問題を表示
 function displayQuestion() {
+    // currentTestとwordsの存在チェック
+    if (!currentTest || !currentTest.words || currentTest.words.length === 0) {
+        console.error('テストデータが正しく初期化されていません');
+        alert('テストデータにエラーがあります。ホーム画面に戻ります。');
+        switchScreen('home');
+        return;
+    }
+    
+    // 新しい問題のため回答フラグをリセット
+    currentTest.questionAnswered = false;
+    
     const wordObj = currentTest.words[currentTest.currentQuestionIndex];
+    
+    if (!wordObj) {
+        console.error('単語オブジェクトが見つかりません:', currentTest.currentQuestionIndex);
+        return;
+    }
     
     // 問題カウンター更新
     document.getElementById('question-counter').textContent = `${currentTest.currentQuestionIndex + 1} / ${currentTest.words.length}`;
@@ -910,6 +3007,10 @@ function displayQuestion() {
         optionDiv.textContent = option.text;
         optionDiv.dataset.option = index;
         optionDiv.dataset.correct = option.correct;
+        // 選択肢を有効化
+        optionDiv.style.pointerEvents = 'auto';
+        optionDiv.style.cursor = 'pointer';
+        optionDiv.classList.remove('disabled');
         answerOptionsContainer.appendChild(optionDiv);
         
         // 日本語→英語の場合、選択肢に発音ボタンを追加
@@ -1024,9 +3125,13 @@ function getPOSFullName(pos) {
 function checkAnswer(answerElement) {
     if (!answerElement || 
         answerElement.classList.contains('correct') || 
-        answerElement.classList.contains('wrong')) {
+        answerElement.classList.contains('wrong') ||
+        currentTest.questionAnswered) {
         return;
     }
+    
+    // 回答済みフラグを立てる
+    currentTest.questionAnswered = true;
     
     // 回答時間を記録
     const answerTime = Math.round((Date.now() - currentTest.questionStartTime) / 1000);
@@ -1040,6 +3145,11 @@ function checkAnswer(answerElement) {
     // 見た目を更新
     const allOptions = document.querySelectorAll('.answer-option');
     allOptions.forEach(option => {
+        // すべての選択肢を無効化
+        option.style.pointerEvents = 'none';
+        option.style.cursor = 'default';
+        option.classList.add('disabled');
+        
         if (option.dataset.correct === 'true') {
             option.classList.add('correct');
         }
@@ -1048,12 +3158,17 @@ function checkAnswer(answerElement) {
         }
     });
     
-    // 回答を記録
-    currentTest.answers[currentTest.currentQuestionIndex] = {
-        word: wordObj.Word,
-        correct: isCorrect,
-        time: validAnswerTime // 正規化された回答時間を記録
-    };
+    // 回答を記録（wordObjが存在する場合のみ）
+    if (wordObj && wordObj.Word) {
+        currentTest.answers[currentTest.currentQuestionIndex] = {
+            word: wordObj.Word,
+            correct: isCorrect,
+            time: validAnswerTime // 正規化された回答時間を記録
+        };
+    } else {
+        console.error('テストエラー: 単語オブジェクトが存在しません');
+        return;
+    }
     
     // 例文を表示
     if (currentTest.showExamples) {
@@ -1394,8 +3509,29 @@ function startFlashcards() {
     flashcardData.enableSound = document.getElementById('flashcard-sound').checked;
     flashcardData.autoNext = document.getElementById('flashcard-auto-next').checked;
     
-    // 単語を選択（苦手を優先）- getRandomWords関数を使用してテストと同じロジックを適用
-    flashcardData.words = getRandomWords(flashcardData.count, 'all', []);
+    // フォルダから単語を選択
+    const flashcardFolderSelect = document.getElementById('flashcard-folder');
+    const flashcardFolder = flashcardFolderSelect ? flashcardFolderSelect.value : 'all';
+    let availableWords = [];
+    
+    if (flashcardFolder === 'all') {
+        // すべての単語から選択（苦手を優先）
+        flashcardData.words = getRandomWords(flashcardData.count, 'all', []);
+    } else if (progressData.folders[flashcardFolder]) {
+        // 選択されたフォルダの単語からシャッフル
+        availableWords = [...progressData.folders[flashcardFolder].words];
+        const shuffled = availableWords.sort(() => Math.random() - 0.5);
+        flashcardData.words = shuffled.slice(0, Math.min(flashcardData.count, availableWords.length));
+    } else {
+        // デフォルト
+        flashcardData.words = getRandomWords(flashcardData.count, 'all', []);
+    }
+    
+    if (flashcardData.words.length === 0) {
+        alert('選択されたフォルダに単語がありません。');
+        return;
+    }
+    
     flashcardData.currentIndex = 0;
     flashcardData.knownWords = [];
     flashcardData.unknownWords = [];
@@ -1419,10 +3555,14 @@ function startFlashcards() {
     card.classList.remove('flipped');
     card.style.display = 'block';
     
-    // コントロール要素を表示
-    document.getElementById('flashcard-counter').style.display = 'block';
-    document.getElementById('flashcard-controls').style.display = 'flex';
-    document.getElementById('flashcard-finish').style.display = 'block';
+    // コントロール要素を表示（存在チェック付き）
+    const counterElement = document.getElementById('flashcard-counter');
+    const controlsElement = document.getElementById('flashcard-controls');
+    const finishElement = document.getElementById('flashcard-finish');
+    
+    if (counterElement) counterElement.style.display = 'block';
+    if (controlsElement) controlsElement.style.display = 'flex';
+    if (finishElement) finishElement.style.display = 'block';
     
     // 最初のカードを表示
     displayFlashcard();
@@ -1628,10 +3768,15 @@ function finishFlashcards() {
     
     // 結果画面を表示
     document.getElementById('flashcard-results').style.display = 'block';
-    document.getElementById('current-flashcard').style.display = 'none';
-    document.getElementById('flashcard-counter').style.display = 'none';
-    document.getElementById('flashcard-finish').style.display = 'none';
-    document.getElementById('flashcard-controls').style.display = 'none';
+    const currentCard = document.getElementById('current-flashcard');
+    const counterElement = document.getElementById('flashcard-counter');
+    const finishElement = document.getElementById('flashcard-finish');
+    const controlsElement = document.getElementById('flashcard-controls');
+    
+    if (currentCard) currentCard.style.display = 'none';
+    if (counterElement) counterElement.style.display = 'none';
+    if (finishElement) finishElement.style.display = 'none';
+    if (controlsElement) controlsElement.style.display = 'none';
 }
 
 // カレンダーUIの更新
@@ -2306,3 +4451,6 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('遅延回転修正が適用されました');
     }, 500);
 });
+
+// グローバル関数として登録（HTMLから呼び出せるように）
+window.performSearch = performSearch;
